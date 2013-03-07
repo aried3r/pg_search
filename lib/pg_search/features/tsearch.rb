@@ -16,7 +16,7 @@ module PgSearch
       end
 
       def conditions
-        ["(#{tsdocument}) @@ (#{tsquery})", interpolations]
+        Arel::Nodes::InfixOperation.new("@@", tsdocument, tsquery).to_sql
       end
 
       def rank
@@ -38,36 +38,48 @@ module PgSearch
 
         # After this, the SQL expression evaluates to a string containing the term surrounded by single-quotes.
         # If :prefix is true, then the term will also have :* appended to the end.
-        tsquery_sql = [
-          connection.quote("' "),
-          term_sql,
-          connection.quote(" '"),
-          (connection.quote(':*') if options[:prefix])
-        ].compact.join(" || ")
+        terms = [ "' ", term_sql, " '", (':*' if options[:prefix]) ].compact
 
-        "to_tsquery(:dictionary, #{tsquery_sql})"
+        tsquery_sql = terms.inject do |accumulator, term|
+          Arel::Nodes::InfixOperation.new("||", accumulator, term)
+        end
+
+        Arel::Nodes::NamedFunction.new("to_tsquery", [dictionary, tsquery_sql])
       end
 
       def tsquery
         return "''" if query.blank?
         query_terms = query.split(" ").compact
         tsquery_terms = query_terms.map { |term| tsquery_for_term(term) }
-        tsquery_terms.join(options[:any_word] ? ' || ' : ' && ')
+
+        operator = options[:any_word] ? ' || ' : ' && '
+
+        terms_node = tsquery_terms.inject do |accumulator, term|
+          Arel::Nodes::InfixOperation.new("||", accumulator, term)
+        end
+
+        Arel::Nodes::Grouping.new(terms_node)
       end
 
       def tsdocument
         if options[:tsvector_column]
           column_name = connection.quote_column_name(options[:tsvector_column])
-          "#{quoted_table_name}.#{column_name}"
+          Arel::SqlLiteral.new("#{quoted_table_name}.#{column_name}")
         else
-          columns.map do |search_column|
-            tsvector = "to_tsvector(:dictionary, #{normalize(search_column.to_sql)})"
+          terms = columns.map do |search_column|
+            normalized = normalize(search_column.to_sql)
+            tsvector = Arel::Nodes::NamedFunction.new("to_tsvector", [dictionary, normalized])
+
             if search_column.weight.nil?
               tsvector
             else
-              "setweight(#{tsvector}, #{connection.quote(search_column.weight)})"
+              Arel::Nodes::NamedFunction.new("setweight", [tsvector, search_column.weight])
             end
-          end.join(" || ")
+          end
+
+          terms.inject do |accumulator, term|
+            Arel::Nodes::InfixOperation.new("||", accumulator, term)
+          end
         end
       end
 
@@ -85,7 +97,7 @@ module PgSearch
       end
 
       def tsearch_rank
-        ["ts_rank((#{tsdocument}), (#{tsquery}), #{normalization})", interpolations]
+        Arel::Nodes::NamedFunction.new("ts_rank", [tsdocument, tsquery, normalization]).to_sql
       end
 
       def dictionary

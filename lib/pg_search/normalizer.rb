@@ -4,9 +4,7 @@ module PgSearch
       @config = config
     end
 
-    def add_normalization(sql_expression)
-      arel = Arel::SqlLiteral.new(sql_expression)
-
+    def add_normalization(arel)
       if config.ignore.include?(:accents)
         if config.postgresql_version < 90000
           raise PgSearch::NotSupportedForPostgresqlVersion.new(<<-MESSAGE.gsub /^\s*/, '')

@@ -24,7 +24,7 @@ module PgSearch
 
     def conditions
       config.features.map do |feature_name, feature_options|
-        "(#{sanitize_sql_array(feature_for(feature_name).conditions)})"
+        feature_for(feature_name).conditions
       end.join(" OR ")
     end
 

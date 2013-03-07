@@ -27,7 +27,7 @@ module PgSearch
 
         def add_normalization(original_sql)
           otherwise_normalized_sql = normalizer_to_wrap.add_normalization(original_sql)
-          "pg_search_dmetaphone(#{otherwise_normalized_sql})"
+          Arel::Nodes::NamedFunction.new("pg_search_dmetaphone", [otherwise_normalized_sql])
         end
 
         private
